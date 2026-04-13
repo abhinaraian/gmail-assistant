@@ -366,20 +366,22 @@ class GmailAgent:
     def _run_gemini(self, instruction: str) -> None:
         """Run the agentic loop powered by Gemini Flash (free tier)."""
         try:
-            import google.generativeai as genai
+            from google import genai
+            from google.genai import types
         except ImportError:
             raise RuntimeError(
-                "google-generativeai not installed. Run: pip install google-generativeai"
+                "google-genai not installed. Run: pip install google-genai"
             )
 
-        api_key = os.environ.get("GOOGLE_API_KEY")
+        api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
         if not api_key:
             raise ValueError(
-                "GOOGLE_API_KEY not set. Add GOOGLE_API_KEY=your_key to your .env file. "
+                "No Gemini API key found. Add GOOGLE_API_KEY=your_key (or GEMINI_API_KEY=your_key) "
+                "to your .env file. "
                 "Get a free key at https://aistudio.google.com/app/apikey"
             )
 
-        genai.configure(api_key=api_key)
+        client = genai.Client(api_key=api_key)
 
         # Build Gemini function declarations from the shared TOOL_DEFINITIONS.
         # Gemini uses "parameters" (JSON Schema) where Anthropic uses "input_schema".
@@ -394,10 +396,10 @@ class GmailAgent:
                 decl["parameters"] = schema
             function_declarations.append(decl)
 
-        model = genai.GenerativeModel(
-            "gemini-2.0-flash",
-            tools=[{"function_declarations": function_declarations}],
+        config = types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
+            tools=[types.Tool(function_declarations=function_declarations)],
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
 
         self._emit("\n" + "=" * 62, "header")
@@ -406,24 +408,24 @@ class GmailAgent:
         self._emit(f"\nTask: {instruction}\n", "log")
         self._emit("Connecting to Gmail and starting analysis...\n", "log")
 
-        chat = model.start_chat()
-        message: object = instruction
+        contents: list[Any] = [
+            types.Content(role="user", parts=[types.Part(text=instruction)])
+        ]
         max_iterations = 60
 
         for iteration in range(1, max_iterations + 1):
-            response = chat.send_message(message)
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=contents,
+                config=config,
+            )
 
             # Emit any text the model produced this turn
-            for part in response.parts:
-                if hasattr(part, "text") and part.text:
-                    self._emit(f"\n{part.text}", "text")
+            if getattr(response, "text", None):
+                self._emit(f"\n{response.text}", "text")
 
             # Collect function calls from this response
-            fn_calls = [
-                part.function_call
-                for part in response.parts
-                if hasattr(part, "function_call") and part.function_call.name
-            ]
+            fn_calls = list(getattr(response, "function_calls", []) or [])
 
             if not fn_calls:
                 # No more tool calls — the model is done
@@ -439,15 +441,19 @@ class GmailAgent:
                     result_data = {"text": result_json}
 
                 tool_response_parts.append(
-                    genai.protos.Part(
-                        function_response=genai.protos.FunctionResponse(
-                            name=fc.name,
-                            response={"result": result_data},
-                        )
+                    types.Part.from_function_response(
+                        name=fc.name,
+                        response={"result": result_data},
+                        id=getattr(fc, "id", None),
                     )
                 )
 
-            message = tool_response_parts
+            # Preserve the model turn exactly so signatures/tool context are retained.
+            if getattr(response, "candidates", None):
+                model_content = response.candidates[0].content
+                if model_content:
+                    contents.append(model_content)
+            contents.append(types.Content(role="user", parts=tool_response_parts))
 
         self._emit("\n" + "=" * 62, "header")
         self._emit("  Organization complete!", "header")
