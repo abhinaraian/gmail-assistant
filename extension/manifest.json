@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Gmail Assistant",
+  "version": "1.0",
+  "description": "AI-powered Gmail inbox organizer — powered by Claude",
+
+  "permissions": ["sidePanel", "tabs"],
+  "host_permissions": [
+    "https://mail.google.com/*",
+    "http://localhost:8000/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "side_panel": {
+    "default_path": "panel.html"
+  },
+
+  "action": {
+    "default_title": "Gmail Assistant",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'; connect-src http://localhost:8000; style-src 'self' 'unsafe-inline'"
+  }
+}

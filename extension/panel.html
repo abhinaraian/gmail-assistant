@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gmail Assistant</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --blue:         #1a73e8;
+      --blue-dark:    #1557b0;
+      --blue-light:   #e8f0fe;
+      --green:        #188038;
+      --green-light:  #e6f4ea;
+      --red:          #d93025;
+      --red-light:    #fce8e6;
+      --gray-50:      #f8f9fa;
+      --gray-100:     #f1f3f4;
+      --gray-200:     #e8eaed;
+      --gray-300:     #dadce0;
+      --gray-500:     #9aa0a6;
+      --gray-600:     #80868b;
+      --gray-700:     #5f6368;
+      --black:        #202124;
+      --radius:       10px;
+    }
+
+    body {
+      font-family: 'Google Sans', Roboto, system-ui, -apple-system, sans-serif;
+      background: var(--gray-50);
+      color: var(--black);
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ─── Header ─────────────────────────────────────────────────── */
+    .header {
+      background: #fff;
+      height: 56px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--gray-200);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      flex-shrink: 0;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+    .brand-logo {
+      width: 26px;
+      height: 26px;
+      flex-shrink: 0;
+    }
+    .brand-name {
+      font-size: 15.5px;
+      color: var(--gray-700);
+      font-weight: 400;
+      letter-spacing: -0.2px;
+      line-height: 1;
+    }
+    .brand-name strong {
+      color: var(--black);
+      font-weight: 500;
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border-radius: 12px;
+      background: var(--gray-100);
+      font-size: 11.5px;
+      color: var(--gray-700);
+      white-space: nowrap;
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--gray-300);
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .status-dot.connected { background: var(--green); }
+    .status-dot.error     { background: var(--red); }
+
+    /* ─── Main scroll area ───────────────────────────────────────── */
+    .main {
+      flex: 1;
+      padding: 12px 12px 24px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    /* ─── Offline banner ─────────────────────────────────────────── */
+    .offline-banner {
+      background: var(--red-light);
+      color: var(--red);
+      border-radius: 8px;
+      padding: 10px 13px;
+      font-size: 12.5px;
+      line-height: 1.55;
+    }
+    .offline-banner strong { font-weight: 600; }
+    .offline-banner code {
+      background: rgba(217,48,37,.1);
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-family: 'Roboto Mono', ui-monospace, monospace;
+      font-size: 11.5px;
+    }
+    .hidden { display: none !important; }
+
+    /* ─── Instruction card ───────────────────────────────────────── */
+    .card {
+      background: #fff;
+      border: 1px solid var(--gray-200);
+      border-radius: var(--radius);
+      padding: 13px;
+    }
+    .card-label {
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--gray-600);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 8px;
+    }
+    textarea {
+      width: 100%;
+      border: 1.5px solid var(--gray-300);
+      border-radius: 6px;
+      padding: 8px 11px;
+      font-size: 13px;
+      font-family: inherit;
+      color: var(--black);
+      resize: vertical;
+      min-height: 72px;
+      outline: none;
+      line-height: 1.55;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      background: #fff;
+    }
+    textarea:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px rgba(26,115,232,.1);
+    }
+    textarea::placeholder { color: var(--gray-500); }
+
+    /* ─── Chips ──────────────────────────────────────────────────── */
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 9px;
+    }
+    .chip {
+      border: 1.5px solid var(--gray-300);
+      background: #fff;
+      color: var(--blue);
+      border-radius: 14px;
+      padding: 3px 10px;
+      font-size: 11.5px;
+      font-family: inherit;
+      cursor: pointer;
+      line-height: 1.5;
+      transition: background 0.15s, border-color 0.15s;
+      white-space: nowrap;
+    }
+    .chip:hover { background: var(--blue-light); border-color: var(--blue); }
+
+    /* ─── Run button ─────────────────────────────────────────────── */
+    .run-btn {
+      width: 100%;
+      padding: 10px 16px;
+      background: var(--blue);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 13.5px;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      letter-spacing: 0.15px;
+      transition: background 0.15s, box-shadow 0.15s;
+      flex-shrink: 0;
+    }
+    .run-btn:hover:not(:disabled) {
+      background: var(--blue-dark);
+      box-shadow: 0 1px 4px rgba(26,115,232,.35);
+    }
+    .run-btn:disabled { background: var(--gray-300); cursor: not-allowed; }
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,.35);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─── AI Response box ────────────────────────────────────────── */
+    .ai-box {
+      background: #fff;
+      border: 1px solid var(--gray-200);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .ai-box-header {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 13px;
+      border-bottom: 1px solid var(--gray-100);
+      background: #fafbff;
+    }
+    .ai-sparkle {
+      font-size: 13px;
+      color: var(--blue);
+      line-height: 1;
+    }
+    .ai-box-title {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--blue);
+      letter-spacing: 0.1px;
+    }
+    .ai-box-body {
+      padding: 12px 13px;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+    .ai-box-body::-webkit-scrollbar { width: 4px; }
+    .ai-box-body::-webkit-scrollbar-track { background: transparent; }
+    .ai-box-body::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 2px; }
+
+    /* Thinking indicator */
+    .ai-thinking {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--gray-600);
+      font-size: 12.5px;
+      padding: 2px 0;
+    }
+    .dots {
+      display: flex;
+      gap: 3px;
+      align-items: center;
+    }
+    .dots span {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--gray-400, #bdc1c6);
+      animation: dotpulse 1.3s ease-in-out infinite;
+    }
+    .dots span:nth-child(2) { animation-delay: 0.18s; }
+    .dots span:nth-child(3) { animation-delay: 0.36s; }
+    @keyframes dotpulse {
+      0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
+      40%            { opacity: 1;    transform: scale(1); }
+    }
+
+    /* AI text turns */
+    .ai-content { }
+    .ai-turn {
+      font-size: 13px;
+      line-height: 1.65;
+      color: var(--black);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .ai-turn + .ai-turn {
+      margin-top: 11px;
+      padding-top: 11px;
+      border-top: 1px solid var(--gray-100);
+    }
+    .ai-done {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 12px;
+      padding: 8px 11px;
+      background: var(--green-light);
+      color: var(--green);
+      border-radius: 6px;
+      font-size: 12.5px;
+      font-weight: 500;
+    }
+
+    /* ─── Log section ────────────────────────────────────────────── */
+    .log-section {
+      border: 1px solid #3a3a50;
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .log-header {
+      background: #2a2a3e;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+    }
+    .log-header:hover { background: #31314a; }
+    .log-header-left {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .log-title {
+      font-size: 10.5px;
+      font-weight: 600;
+      color: #a0a8c0;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+    .log-badge {
+      font-size: 10px;
+      background: #3a3a56;
+      color: #7a82a0;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-family: ui-monospace, 'Roboto Mono', monospace;
+      line-height: 1.6;
+    }
+    .log-header-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .clear-btn {
+      font-size: 11px;
+      color: #6b6f8a;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-family: inherit;
+      padding: 2px 4px;
+      border-radius: 3px;
+      transition: color 0.15s;
+    }
+    .clear-btn:hover { color: #cdd6f4; }
+    .chevron {
+      color: #6b6f8a;
+      font-size: 11px;
+      line-height: 1;
+      transition: transform 0.22s ease;
+      display: inline-block;
+    }
+    .chevron.collapsed { transform: rotate(-90deg); }
+
+    .log-body {
+      background: #1e1e2e;
+      padding: 9px 12px;
+      font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+      font-size: 11.5px;
+      max-height: 260px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      line-height: 1.6;
+      transition: max-height 0.22s ease, padding 0.22s ease;
+    }
+    .log-body.is-collapsed {
+      max-height: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+    }
+    .log-body::-webkit-scrollbar { width: 4px; }
+    .log-body::-webkit-scrollbar-track { background: transparent; }
+    .log-body::-webkit-scrollbar-thumb { background: #45475a; border-radius: 2px; }
+
+    .line { color: #cdd6f4; word-break: break-all; white-space: pre-wrap; }
+    .line.tool    { color: #89b4fa; }
+    .line.success { color: #a6e3a1; }
+    .line.error   { color: #f38ba8; }
+    .line.header  { color: #fab387; }
+    .line.empty   { height: 3px; }
+  </style>
+</head>
+<body>
+
+  <!-- ── Header ──────────────────────────────────────────────────── -->
+  <header class="header">
+    <div class="brand">
+      <svg class="brand-logo" viewBox="0 0 26 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="26" height="26" rx="6" fill="#fff" stroke="#e8eaed" stroke-width="1.2"/>
+        <rect x="3.5" y="6.5" width="19" height="13" rx="1.5" stroke="#5f6368" stroke-width="1.2" fill="none"/>
+        <path d="M3.5 8.5L13 14.5L22.5 8.5" stroke="#EA4335" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+      </svg>
+      <span class="brand-name">Gmail <strong>Assistant</strong></span>
+    </div>
+    <div class="status-pill">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Checking…</span>
+    </div>
+  </header>
+
+  <!-- ── Main ────────────────────────────────────────────────────── -->
+  <main class="main">
+
+    <!-- Offline banner -->
+    <div class="offline-banner hidden" id="offlineBanner">
+      <strong>Server offline.</strong> Start it with:<br>
+      <code>python server.py</code>
+    </div>
+
+    <!-- Instruction card -->
+    <div class="card">
+      <div class="card-label">Instruction</div>
+      <textarea
+        id="instruction"
+        placeholder="Describe how you'd like your inbox organized…"
+        rows="3"
+      ></textarea>
+      <div class="chips">
+        <button class="chip" data-text="Analyze my inbox and organize it with smart, meaningful labels. Be comprehensive and aim to label at least 75% of my emails.">Full organize</button>
+        <button class="chip" data-text="Sample my inbox (max 50 emails) and create just 3 labels. Do not apply any labels yet — only report what you would do.">Dry run</button>
+        <button class="chip" data-text="Create a Newsletters label and archive all newsletter and subscription emails. Keep everything else untouched.">Newsletters</button>
+        <button class="chip" data-text="Create a Finance label for receipts, invoices, bank statements, and payment confirmations. Keep them in inbox.">Finance</button>
+        <button class="chip" data-text="Look at emails from the last 30 days only: in:inbox newer_than:30d. Organize with 5 simple labels.">Last 30 days</button>
+      </div>
+    </div>
+
+    <!-- Run button -->
+    <button class="run-btn" id="runBtn" disabled>
+      <span class="spinner hidden" id="spinner"></span>
+      <span id="btnText">Organize Inbox</span>
+    </button>
+
+    <!-- AI Response box -->
+    <div class="ai-box hidden" id="aiBox">
+      <div class="ai-box-header">
+        <span class="ai-sparkle">✦</span>
+        <span class="ai-box-title">Claude</span>
+      </div>
+      <div class="ai-box-body">
+        <div id="aiThinking" class="ai-thinking hidden">
+          Analyzing
+          <span class="dots">
+            <span></span><span></span><span></span>
+          </span>
+        </div>
+        <div id="aiContent" class="ai-content"></div>
+      </div>
+    </div>
+
+    <!-- Activity Log (collapsible) -->
+    <div class="log-section hidden" id="logSection">
+      <div class="log-header" id="logToggle">
+        <div class="log-header-left">
+          <span class="log-title">Activity Log</span>
+          <span class="log-badge" id="logBadge">0</span>
+        </div>
+        <div class="log-header-right">
+          <button class="clear-btn" id="clearBtn">Clear</button>
+          <span class="chevron" id="chevron">▾</span>
+        </div>
+      </div>
+      <div class="log-body" id="logBody"></div>
+    </div>
+
+  </main>
+
+  <script src="panel.js"></script>
+</body>
+</html>

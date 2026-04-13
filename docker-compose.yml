@@ -1,0 +1,14 @@
+services:
+  gmail-assistant:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - SERVER_HOST=0.0.0.0   # bind on all interfaces so the port-mapping works
+      - DOCKER_ENV=1           # triggers console-based Gmail OAuth flow
+    volumes:
+      # credentials/ is mounted so token.json persists across container restarts
+      # and credentials.json is read from the host without baking it into the image
+      - ./credentials:/app/credentials
+    restart: unless-stopped
