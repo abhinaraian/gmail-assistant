@@ -1,11 +1,12 @@
 """
-Gmail organization agent — agentic loop powered by Claude with tool use.
-Claude analyzes the inbox, designs a label taxonomy, and applies it.
+Gmail organization agent — agentic loop powered by Claude or Gemini with tool use.
+The AI analyzes the inbox, designs a label taxonomy, and applies it.
 """
 
 import json
+import os
 import time
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 from anthropic import Anthropic, RateLimitError
 from .gmail_client import GmailClient
 from .tools import TOOL_DEFINITIONS
@@ -135,16 +136,22 @@ in:inbox                            only inbox (not archived)
 
 LogCallback = Callable[[str, str], None]
 
+_DEFAULT_INSTRUCTION = (
+    "Analyze my inbox and organize it with smart, meaningful labels. "
+    "Be comprehensive and aim to label at least 75% of my emails."
+)
+
 
 def _default_log(text: str, msg_type: str = "log") -> None:
     print(text)
 
 
 class GmailAgent:
-    """Drives the agentic loop: Claude decides what tools to call, this class executes them."""
+    """Drives the agentic loop: Claude or Gemini decides what tools to call, this class executes them."""
 
-    def __init__(self, log_callback: Optional[LogCallback] = None):
-        self.client = Anthropic()
+    def __init__(self, log_callback: Optional[LogCallback] = None, provider: str = "claude"):
+        self.provider = provider  # "claude" or "gemini"
+        self.client = Anthropic() if provider == "claude" else None
         self.gmail = GmailClient()
         self.messages: list[dict] = []
         self._log_cb = log_callback or _default_log
@@ -245,19 +252,24 @@ class GmailAgent:
             return json.dumps(error)
 
     # ------------------------------------------------------------------ #
-    #  Agentic loop                                                         #
+    #  Agentic loop dispatcher                                             #
     # ------------------------------------------------------------------ #
 
-    def run(
-        self,
-        instruction: str = (
-            "Analyze my inbox and organize it with smart, meaningful labels. "
-            "Be comprehensive and aim to label at least 75% of my emails."
-        ),
-    ) -> None:
-        """Run the inbox organization agent until Claude signals it is done."""
+    def run(self, instruction: str = _DEFAULT_INSTRUCTION) -> None:
+        """Run the inbox organization agent using the selected provider."""
+        if self.provider == "gemini":
+            self._run_gemini(instruction)
+        else:
+            self._run_claude(instruction)
+
+    # ------------------------------------------------------------------ #
+    #  Claude loop                                                          #
+    # ------------------------------------------------------------------ #
+
+    def _run_claude(self, instruction: str) -> None:
+        """Run the agentic loop powered by Claude Sonnet."""
         self._emit("\n" + "=" * 62, "header")
-        self._emit("  Gmail Assistant  —  AI-Powered Inbox Organizer", "header")
+        self._emit("  Gmail Assistant  —  Powered by Claude Sonnet", "header")
         self._emit("=" * 62, "header")
         self._emit(f"\nTask: {instruction}\n", "log")
         self._emit("Connecting to Gmail and starting analysis...\n", "log")
@@ -333,3 +345,110 @@ class GmailAgent:
             break
 
         self._emit("\n[Warning: maximum iterations reached — stopping.]", "log")
+
+    # ------------------------------------------------------------------ #
+    #  Gemini loop                                                          #
+    # ------------------------------------------------------------------ #
+
+    def _sanitize_schema_for_gemini(self, schema: Any) -> Any:
+        """Remove JSON Schema fields Gemini rejects (e.g. `default`)."""
+        if isinstance(schema, dict):
+            cleaned: dict[str, Any] = {}
+            for key, value in schema.items():
+                if key == "default":
+                    continue
+                cleaned[key] = self._sanitize_schema_for_gemini(value)
+            return cleaned
+        if isinstance(schema, list):
+            return [self._sanitize_schema_for_gemini(item) for item in schema]
+        return schema
+
+    def _run_gemini(self, instruction: str) -> None:
+        """Run the agentic loop powered by Gemini Flash (free tier)."""
+        try:
+            import google.generativeai as genai
+        except ImportError:
+            raise RuntimeError(
+                "google-generativeai not installed. Run: pip install google-generativeai"
+            )
+
+        api_key = os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "GOOGLE_API_KEY not set. Add GOOGLE_API_KEY=your_key to your .env file. "
+                "Get a free key at https://aistudio.google.com/app/apikey"
+            )
+
+        genai.configure(api_key=api_key)
+
+        # Build Gemini function declarations from the shared TOOL_DEFINITIONS.
+        # Gemini uses "parameters" (JSON Schema) where Anthropic uses "input_schema".
+        function_declarations = []
+        for t in TOOL_DEFINITIONS:
+            schema = self._sanitize_schema_for_gemini(
+                t.get("input_schema", {"type": "object", "properties": {}})
+            )
+            decl: dict = {"name": t["name"], "description": t["description"]}
+            # Only include parameters when there are actual properties to declare
+            if schema.get("properties"):
+                decl["parameters"] = schema
+            function_declarations.append(decl)
+
+        model = genai.GenerativeModel(
+            "gemini-2.0-flash",
+            tools=[{"function_declarations": function_declarations}],
+            system_instruction=SYSTEM_PROMPT,
+        )
+
+        self._emit("\n" + "=" * 62, "header")
+        self._emit("  Gmail Assistant  —  Powered by Gemini Flash (free)", "header")
+        self._emit("=" * 62, "header")
+        self._emit(f"\nTask: {instruction}\n", "log")
+        self._emit("Connecting to Gmail and starting analysis...\n", "log")
+
+        chat = model.start_chat()
+        message: object = instruction
+        max_iterations = 60
+
+        for iteration in range(1, max_iterations + 1):
+            response = chat.send_message(message)
+
+            # Emit any text the model produced this turn
+            for part in response.parts:
+                if hasattr(part, "text") and part.text:
+                    self._emit(f"\n{part.text}", "text")
+
+            # Collect function calls from this response
+            fn_calls = [
+                part.function_call
+                for part in response.parts
+                if hasattr(part, "function_call") and part.function_call.name
+            ]
+
+            if not fn_calls:
+                # No more tool calls — the model is done
+                break
+
+            # Execute each tool and build the response parts
+            tool_response_parts = []
+            for fc in fn_calls:
+                result_json = self._execute_tool(fc.name, dict(fc.args))
+                try:
+                    result_data = json.loads(result_json)
+                except (json.JSONDecodeError, ValueError):
+                    result_data = {"text": result_json}
+
+                tool_response_parts.append(
+                    genai.protos.Part(
+                        function_response=genai.protos.FunctionResponse(
+                            name=fc.name,
+                            response={"result": result_data},
+                        )
+                    )
+                )
+
+            message = tool_response_parts
+
+        self._emit("\n" + "=" * 62, "header")
+        self._emit("  Organization complete!", "header")
+        self._emit("=" * 62, "header")

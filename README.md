@@ -162,13 +162,41 @@ gmail-assistant/
 
 ---
 
+## Model Selection
+
+The extension lets you pick your AI model right in the side panel:
+
+| Model | Cost | Speed | Notes |
+|---|---|---|---|
+| **Claude Sonnet** | Paid (Anthropic credits) | ~2–5 min for a full run | Highest quality reasoning and writing |
+| **Gemini Flash** | **Free** (Google AI Studio) | ~2–4 min for a full run | Excellent for most inboxes, no credit card needed |
+
+### Using Gemini Flash (free)
+
+1. Go to [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) and create a free API key
+2. Add it to your `.env` file:
+   ```
+   GOOGLE_API_KEY=your_google_api_key_here
+   ```
+3. In the extension side panel, click **Gemini Flash** before hitting Organize Inbox
+
+> Gemini Flash uses Google's free tier — no billing required and no credit card needed.
+
+### Using Claude Sonnet (paid)
+
+1. Add credits at [console.anthropic.com/settings/billing](https://console.anthropic.com/settings/billing)
+2. Ensure `ANTHROPIC_API_KEY` is set in your `.env`
+3. In the extension, click **Claude Sonnet** (the default)
+
+---
+
 ## Sharing with a friend
 
-Each person needs their own Gmail credentials and Anthropic key — the agent runs against their own inbox.
+Each person needs their own Gmail credentials and at least one AI key — the agent runs against their own inbox.
 
 1. They clone the repo
 2. They follow the [Setup](#setup) steps above to get their own `credentials.json`
-3. They add their own `ANTHROPIC_API_KEY` to `.env`
+3. They add their own `ANTHROPIC_API_KEY` and/or `GOOGLE_API_KEY` to `.env`
 4. They run via Docker or locally
 
 ---
@@ -179,6 +207,7 @@ Each person needs their own Gmail credentials and Anthropic key — the agent ru
 |---|---|
 | `credentials.json not found` | Complete the Gmail setup steps above |
 | `ANTHROPIC_API_KEY not set` | Create `.env` from `.env.example` and add your key |
+| `GOOGLE_API_KEY not set` | Add a free key from [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) |
 | Credit balance too low | Add credits at [console.anthropic.com/settings/billing](https://console.anthropic.com/settings/billing) |
 | "Access blocked" on OAuth screen | OAuth consent screen → Test users → add your email |
 | Token expired | Delete `credentials/token.json` and re-run |

@@ -5,6 +5,7 @@ services:
       - "8000:8000"
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - SERVER_HOST=0.0.0.0   # bind on all interfaces so the port-mapping works
       - DOCKER_ENV=1           # triggers console-based Gmail OAuth flow
     volumes:

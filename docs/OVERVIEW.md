@@ -2,8 +2,15 @@
 
 ## Purpose
 
-An agentic Gmail inbox organizer powered by Anthropic's Claude (`claude-sonnet-4-6`).
-Given a natural-language instruction, the agent autonomously organizes, labels, archives,
+An agentic Gmail inbox organizer with a **dual AI provider** design. The user picks their
+preferred model in the Chrome extension side panel:
+
+| Provider | Model | Cost | When to use |
+|---|---|---|---|
+| **Claude Sonnet** | `claude-sonnet-4-6` | Paid (Anthropic credits) | Highest quality reasoning |
+| **Gemini Flash** | `gemini-2.0-flash` | Free (Google AI Studio) | No credit card, great for most inboxes |
+
+Given a natural-language instruction, the selected AI autonomously organizes, labels, archives,
 and cleans the inbox through a multi-turn agentic loop (up to 60 iterations).
 
 ## What the Agent Does
@@ -25,32 +32,56 @@ and cleans the inbox through a multi-turn agentic loop (up to 60 iterations).
 │                   Chrome Extension (UI)                        │
 │   panel.html + panel.js        background.js (service worker) │
 │   Side panel in Gmail           Opens panel on Gmail tabs only │
+│   Model selector: [✦ Claude Sonnet] [◈ Gemini Flash]         │
 └───────────────────────┬──────────────────────────────────────┘
                         │ HTTP / SSE  (localhost:8000)
+                        │ POST /run  { instruction, model }
 ┌───────────────────────▼──────────────────────────────────────┐
 │                FastAPI Server  (src/server.py)                 │
 │   GET /status    POST /run    GET /stream (SSE)                │
 │   Agent runs in daemon thread; log lines flow via queue.Queue  │
 └───────────────────────┬──────────────────────────────────────┘
-                        │
-              ┌─────────┴──────────┐
-              ▼                    ▼
-  ┌─────────────────────┐  ┌──────────────────────────────┐
-  │  Anthropic Claude   │  │  GmailClient                 │
-  │  claude-sonnet-4-6  │  │  (src/gmail_client.py)       │
-  │  Tool use / SSE     │  │  OAuth2, batch ops           │
-  │  8192 max_tokens    │  │  12 Gmail API methods        │
-  └─────────────────────┘  └──────────────────────────────┘
-              │ tool calls                ▲
-              └──── GmailAgent ──────────┘
-                    (src/agent.py)
-                    Agentic loop (≤60 iters)
-                    Tool dispatcher
+                        │  provider = "claude" | "gemini"
+              ┌─────────┴──────────────┐
+              ▼                        ▼
+  ┌─────────────────────┐  ┌──────────────────────┐
+  │  Anthropic Claude   │  │  Google Gemini Flash │
+  │  claude-sonnet-4-6  │  │  gemini-2.0-flash    │
+  │  Tool use / SSE     │  │  Function calling    │
+  │  8192 max_tokens    │  │  1M context window   │
+  └─────────────────────┘  └──────────────────────┘
+              │  tool calls (shared _execute_tool)  │
+              └────────── GmailAgent ───────────────┘
+                          (src/agent.py)
+                          Agentic loop (≤60 iters)
+                                    │
+                          ┌─────────▼──────────────┐
+                          │  GmailClient            │
+                          │  (src/gmail_client.py)  │
+                          │  OAuth2, batch ops      │
+                          │  12 Gmail API methods   │
+                          └─────────────────────────┘
 ```
 
 ## Key Design Decisions
 
-### 1. Streaming API (`messages.stream`) instead of `messages.create()`
+### 1. Dual AI Provider (Claude + Gemini)
+`GmailAgent.__init__(provider="claude"|"gemini")` selects the backend at construction time.
+The Chrome extension POSTs `{ instruction, model }` to `/run`; the server passes `provider=`
+to `GmailAgent`. Both providers share the same `_execute_tool()` dispatcher and Gmail client.
+
+- **Claude path** (`_run_claude`): uses `client.messages.stream()` with prompt caching and
+  exponential backoff on 429s
+- **Gemini path** (`_run_gemini`): uses `genai.GenerativeModel.start_chat()` with function
+  declarations derived from the same `TOOL_DEFINITIONS`. Tool responses are sent back as
+  `genai.protos.Part(function_response=...)` objects
+
+The `TOOL_DEFINITIONS` list in `tools.py` is the single source of truth for tool schemas.
+Claude receives them as `input_schema`; Gemini receives them as `parameters` (same JSON Schema
+format, renamed field). Tools with no parameters omit the `parameters` key for Gemini
+compatibility.
+
+### 2. Streaming API (`messages.stream`) instead of `messages.create()`
 Long agentic runs (60 iterations × multiple tool calls each) can exceed HTTP request
 timeouts on a single blocking call. `client.messages.stream()` keeps the TCP connection
 alive throughout the full run via chunked transfer encoding.
@@ -100,28 +131,36 @@ rate limit hits by reducing billable input token count.
 ## Data Flow (One Agent Run)
 
 ```
-1. User types instruction in Chrome extension panel, clicks "Organize Inbox"
-2. panel.js → POST /run { instruction: "..." }
-3. FastAPI /run spawns daemon thread → GmailAgent.run(instruction)
-4. panel.js opens EventSource → GET /stream (persistent SSE connection)
+1. User picks model (Claude Sonnet / Gemini Flash) in side panel
+2. User types instruction, clicks "Organize Inbox"
+3. panel.js → POST /run { instruction: "...", model: "claude"|"gemini" }
+4. FastAPI /run validates model, spawns daemon thread
+   → GmailAgent(provider=...).run(instruction)
+5. panel.js opens EventSource → GET /stream (persistent SSE connection)
 
+── Claude path ────────────────────────────────────────────────────────
 Loop (up to 60 iterations):
-  a. Build: messages list + system block (with cache_control)
-  b. client.messages.stream() → Claude generates response (streaming)
-  c. Emit any text blocks → _emit() → _enqueue() → queue.Queue
-  d. SSE generator dequeues → "data: {...}\n\n" → EventSource.onmessage
-  e. panel.js appendLine() → visible in activity log
-  f. stop_reason == "end_turn"? → emit "done", exit loop
-  g. stop_reason == "tool_use":
-     - For each tool_use block:
-       * _execute_tool() → GmailClient method → Gmail API call(s)
-       * Emit tool name + result via _emit()
-       * Trim result if tool is sample_inbox or get_email_body
-     - Append tool_results to messages
-     - Continue loop
+  a. Build: messages list + system block (cache_control for prompt caching)
+  b. client.messages.stream() → Claude generates response
+  c. Emit text blocks → _emit("text") → queue → SSE → AI Response box
+  d. stop_reason == "end_turn"? → emit "done", exit
+  e. stop_reason == "tool_use":
+     - _execute_tool() → GmailClient → Gmail API
+     - Trim large results (sample_inbox, get_email_body)
+     - Append tool_results, continue loop
 
-5. Thread exits → _agent_running = False
-6. _enqueue("✓ Organization complete!", "done") → panel.js setRunningState(false)
+── Gemini path ────────────────────────────────────────────────────────
+Loop (up to 60 iterations):
+  a. chat.send_message(message)  [message = str first turn, list of Parts thereafter]
+  b. Emit text parts → _emit("text") → queue → SSE → AI Response box
+  c. No function_call parts? → done, exit
+  d. For each function_call part:
+     - _execute_tool() → GmailClient → Gmail API
+     - Build genai.protos.Part(function_response=...)
+  e. message = [tool response parts], continue loop
+
+6. Thread exits → _agent_running = False
+7. _enqueue("✓ Organization complete!", "done") → panel.js setRunningState(false)
 ```
 
 ## Tool Inventory
@@ -146,29 +185,35 @@ Loop (up to 60 iterations):
 ```
 GmailAssistant/
 ├── main.py                    # CLI entry point (python main.py -i "...")
-├── server.py                  # uvicorn launcher for Chrome extension mode
-├── requirements.txt           # Python dependencies
-├── .env                       # ANTHROPIC_API_KEY (gitignored)
-├── .env.example               # Template
+├── server.py                  # uvicorn launcher — reads SERVER_HOST env var
+├── requirements.txt           # Python dependencies (Anthropic + Gemini + Gmail)
+├── Dockerfile                 # Container image (python:3.11-slim)
+├── docker-compose.yml         # Mounts credentials/, maps port 8000
+├── .dockerignore              # Excludes venv, .env, credentials, extension, docs
+├── .env                       # ANTHROPIC_API_KEY + GOOGLE_API_KEY (gitignored)
+├── .env.example               # Template with both keys
 ├── .gitignore
-├── SETUP.md                   # Human-readable setup guide
 ├── credentials/
-│   ├── credentials.json       # Google OAuth client secret (gitignored, download from Google Cloud)
+│   ├── credentials.json       # Google OAuth client secret (gitignored)
 │   └── token.json             # Auto-generated OAuth token (gitignored)
 ├── src/
 │   ├── __init__.py            # Empty package marker
-│   ├── agent.py               # Agentic loop + tool dispatcher + system prompt + caching
-│   ├── gmail_client.py        # Gmail API wrapper (OAuth2, all 12 operations, batch ops)
-│   ├── tools.py               # Tool JSON schemas passed to Claude (12 tools)
-│   └── server.py              # FastAPI: /status, /run, /stream (SSE)
-└── extension/
-    ├── manifest.json          # Chrome MV3: permissions, CSP, side panel declaration
-    ├── background.js          # Service worker: enables panel only on Gmail tabs
-    ├── panel.html             # Side panel UI (header, textarea, quick-action chips, log)
-    ├── panel.js               # Panel logic: SSE client, run button, status poll, log rendering
-    └── icons/
-        ├── icon16.png
-        ├── icon32.png
-        ├── icon48.png
-        └── icon128.png
+│   ├── agent.py               # Dual-provider agentic loop (Claude + Gemini), tool dispatcher
+│   ├── gmail_client.py        # Gmail API wrapper (OAuth2, headless Docker flow, 12 operations)
+│   ├── tools.py               # Tool JSON schemas — single source of truth for both providers
+│   └── server.py              # FastAPI: /status, /run (accepts model field), /stream (SSE)
+├── extension/
+│   ├── manifest.json          # Chrome MV3: sidePanel, host_permissions for localhost:8000
+│   ├── background.js          # Service worker: enables panel only on Gmail tabs
+│   ├── panel.html             # UI: instruction card, model selector, AI box, collapsible log
+│   ├── panel.js               # SSE client, model selector logic, run button, log rendering
+│   └── icons/
+│       ├── icon16.png
+│       ├── icon32.png
+│       ├── icon48.png
+│       └── icon128.png
+└── docs/
+    ├── OVERVIEW.md            # Architecture, design decisions, data flow (this file)
+    ├── BACKEND.md             # Complete Python source reference
+    └── EXTENSION.md           # Complete extension source reference
 ```

@@ -181,6 +181,63 @@
     }
     .chip:hover { background: var(--blue-light); border-color: var(--blue); }
 
+    /* ─── Model selector ────────────────────────────────────────────── */
+    .model-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-top: 10px;
+    }
+    .model-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border: 1.5px solid var(--gray-300);
+      border-radius: 8px;
+      background: #fff;
+      cursor: pointer;
+      font-family: inherit;
+      text-align: left;
+      transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+    }
+    .model-btn:hover { border-color: var(--blue); background: var(--blue-light); }
+    .model-btn.active {
+      border-color: var(--blue);
+      background: var(--blue-light);
+      box-shadow: 0 0 0 2px rgba(26,115,232,.15);
+    }
+    .model-icon {
+      font-size: 14px;
+      line-height: 1;
+      flex-shrink: 0;
+      color: var(--blue);
+    }
+    .model-info { min-width: 0; }
+    .model-name {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--black);
+      white-space: nowrap;
+    }
+    .model-sub {
+      font-size: 10.5px;
+      color: var(--gray-600);
+      margin-top: 1px;
+    }
+    .model-badge {
+      margin-left: auto;
+      font-size: 9.5px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 10px;
+      flex-shrink: 0;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .model-badge.free  { background: #e6f4ea; color: var(--green); }
+    .model-badge.paid  { background: #fce8e6; color: var(--red); }
+
     /* ─── Run button ─────────────────────────────────────────────── */
     .run-btn {
       width: 100%;
@@ -440,6 +497,26 @@
         <button class="chip" data-text="Create a Finance label for receipts, invoices, bank statements, and payment confirmations. Keep them in inbox.">Finance</button>
         <button class="chip" data-text="Look at emails from the last 30 days only: in:inbox newer_than:30d. Organize with 5 simple labels.">Last 30 days</button>
       </div>
+
+      <div class="card-label" style="margin-top:12px;">AI Model</div>
+      <div class="model-row">
+        <button class="model-btn active" id="btnClaude" data-model="claude">
+          <span class="model-icon">✦</span>
+          <div class="model-info">
+            <div class="model-name">Claude Sonnet</div>
+            <div class="model-sub">Best quality</div>
+          </div>
+          <span class="model-badge paid">Paid</span>
+        </button>
+        <button class="model-btn" id="btnGemini" data-model="gemini">
+          <span class="model-icon">◈</span>
+          <div class="model-info">
+            <div class="model-name">Gemini Flash</div>
+            <div class="model-sub">Fast &amp; capable</div>
+          </div>
+          <span class="model-badge free">Free</span>
+        </button>
+      </div>
     </div>
 
     <!-- Run button -->
@@ -451,8 +528,8 @@
     <!-- AI Response box -->
     <div class="ai-box hidden" id="aiBox">
       <div class="ai-box-header">
-        <span class="ai-sparkle">✦</span>
-        <span class="ai-box-title">Claude</span>
+        <span class="ai-sparkle" id="aiSparkle">✦</span>
+        <span class="ai-box-title" id="aiBoxTitle">Claude Sonnet</span>
       </div>
       <div class="ai-box-body">
         <div id="aiThinking" class="ai-thinking hidden">

@@ -10,6 +10,8 @@ const spinner       = document.getElementById("spinner");
 const btnText       = document.getElementById("btnText");
 
 const aiBox         = document.getElementById("aiBox");
+const aiSparkle     = document.getElementById("aiSparkle");
+const aiBoxTitle    = document.getElementById("aiBoxTitle");
 const aiThinking    = document.getElementById("aiThinking");
 const aiContent     = document.getElementById("aiContent");
 
@@ -20,6 +22,9 @@ const logBadge      = document.getElementById("logBadge");
 const chevron       = document.getElementById("chevron");
 const clearBtn      = document.getElementById("clearBtn");
 
+const btnClaude     = document.getElementById("btnClaude");
+const btnGemini     = document.getElementById("btnGemini");
+
 // ── State ───────────────────────────────────────────────────────────────────
 let isRunning    = false;
 let serverOnline = false;
@@ -28,6 +33,7 @@ let logLineCount = 0;
 let logsExpanded = true;
 let aiTurnEl     = null;   // current <div.ai-turn> receiving text
 let hasAIText    = false;  // whether any text has arrived this run
+let selectedModel = "claude";  // "claude" or "gemini"
 
 // ── Status ──────────────────────────────────────────────────────────────────
 function setOnline(online) {
@@ -48,6 +54,24 @@ async function checkStatus() {
     setOnline(false);
   }
 }
+
+// ── Model selector ───────────────────────────────────────────────────────────
+const MODEL_META = {
+  claude: { icon: "✦", title: "Claude Sonnet" },
+  gemini: { icon: "◈", title: "Gemini Flash"  },
+};
+
+function selectModel(model) {
+  selectedModel = model;
+  btnClaude.classList.toggle("active", model === "claude");
+  btnGemini.classList.toggle("active", model === "gemini");
+  const meta = MODEL_META[model];
+  aiSparkle.textContent  = meta.icon;
+  aiBoxTitle.textContent = meta.title;
+}
+
+btnClaude.addEventListener("click", () => selectModel("claude"));
+btnGemini.addEventListener("click", () => selectModel("gemini"));
 
 // ── Running state ────────────────────────────────────────────────────────────
 function setRunningState(running) {
@@ -202,7 +226,7 @@ runBtn.addEventListener("click", async () => {
     const res = await fetch(`${SERVER}/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instruction: inst }),
+      body: JSON.stringify({ instruction: inst, model: selectedModel }),
     });
     const data = await res.json();
     if (data.error) {

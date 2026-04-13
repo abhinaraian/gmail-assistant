@@ -50,6 +50,7 @@ class RunRequest(BaseModel):
         "Analyze my inbox and organize it with smart, meaningful labels. "
         "Be comprehensive and aim to label at least 75% of my emails."
     )
+    model: str = "claude"   # "claude" or "gemini"
 
 
 @app.post("/run")
@@ -66,12 +67,14 @@ async def run_agent(req: RunRequest):
         except queue.Empty:
             break
 
+    provider = req.model if req.model in ("claude", "gemini") else "claude"
+
     def _run_in_thread():
         global _agent_running
         _agent_running = True
         try:
             from src.agent import GmailAgent
-            agent = GmailAgent(log_callback=_enqueue)
+            agent = GmailAgent(log_callback=_enqueue, provider=provider)
             agent.run(req.instruction)
             _enqueue("✓ Organization complete!", "done")
         except Exception as exc:

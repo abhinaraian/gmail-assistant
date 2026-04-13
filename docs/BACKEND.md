@@ -8,6 +8,7 @@ Complete source for all Python files. Recreate each file at the path shown.
 
 ```
 anthropic>=0.40.0
+google-generativeai>=0.8.0
 google-auth-oauthlib>=1.2.0
 google-auth-httplib2>=0.2.0
 google-api-python-client>=2.150.0
@@ -22,7 +23,11 @@ uvicorn>=0.27.0
 
 ```
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
+GOOGLE_API_KEY=your_google_api_key_here
 ```
+
+Both keys are optional — only the key for your chosen model needs to be set.
+Get a free Gemini key at https://aistudio.google.com/app/apikey
 
 ---
 
@@ -131,6 +136,7 @@ if __name__ == "__main__":
 ## `server.py` (root)
 
 uvicorn launcher for Chrome extension mode. Run with `python server.py`.
+Reads `SERVER_HOST` env var (defaults to `127.0.0.1` locally; Docker sets it to `0.0.0.0`).
 
 ```python
 """
@@ -145,18 +151,19 @@ import sys
 
 
 def main():
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        # Try loading .env manually before giving up
-        try:
-            from dotenv import load_dotenv
-            load_dotenv()
-        except ImportError:
-            pass
+    # Try loading .env so keys are available before the preflight checks
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
 
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        print("Error: ANTHROPIC_API_KEY is not set.")
-        print("  1. Copy .env.example to .env")
-        print("  2. Add your key:  ANTHROPIC_API_KEY=sk-ant-...")
+    # At least one AI key must be present (Claude or Gemini)
+    has_claude = bool(os.getenv("ANTHROPIC_API_KEY"))
+    has_gemini = bool(os.getenv("GOOGLE_API_KEY"))
+    if not has_claude and not has_gemini:
+        print("Error: No AI API key found.")
+        print("  Set ANTHROPIC_API_KEY (Claude) or GOOGLE_API_KEY (Gemini) in .env")
         sys.exit(1)
 
     if not os.path.exists("credentials/credentials.json"):
@@ -170,15 +177,17 @@ def main():
         print("Error: uvicorn not installed. Run: pip install -r requirements.txt")
         sys.exit(1)
 
+    host = os.environ.get("SERVER_HOST", "127.0.0.1")
+
     print("=" * 50)
     print("  Gmail Assistant — Local Server")
     print("=" * 50)
-    print("\n  Server:    http://localhost:8000")
+    print(f"\n  Server:    http://{host}:8000")
     print("  Open Gmail, then click the extension icon.\n")
 
     uvicorn.run(
         "src.server:app",
-        host="127.0.0.1",
+        host=host,
         port=8000,
         reload=False,
         log_level="warning",
